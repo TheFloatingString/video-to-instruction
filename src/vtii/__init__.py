@@ -82,6 +82,72 @@ def populate_image_content(frames):
 
     return content
 
+
+def get_summary_from_windows(video_filepath: str) -> str:
+    list_of_action_summaries = []
+    cap = cv2.VideoCapture(video_filepath)
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    print("video loaded.")
+    window_length = 120
+    n_windows = int(
+        2 * len(frames) / window_length
+    )  # TODO: there might be clipping here
+    window_step_size = int(window_length / 2)  # TODO: there might be clipping here
+    start = 0
+    end = window_step_size
+    for i in tqdm.trange(n_windows):
+        frames_window = frames[start:end]
+        action_summary = get_summary_from_sliding_window_frame(frames_window)
+        print(action_summary)
+        start += window_step_size
+        end += window_step_size
+        list_of_action_summaries.append(action_summary)
+    return list_of_action_summaries
+
+
+def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
+    frames = []
+
+    for i in range(len(list_of_frames)):
+        if i % 15 == 0:
+            frames.append(list_of_frames[i])
+
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    if VERBOSE:
+        print(len(frames))
+    resp = client.responses.create(
+        model="o4-mini",
+        input=[
+            {
+                "role": "user",
+                "content": """Given the following frames:
+
+- what is the image number where the [action] begins?
+- what is the image number where the [action] ends?
+
+[action] = picking up and putting down the can""",
+            },
+            {
+                "role": "user",
+                "content": populate_image_content(frames),
+            },
+        ],
+    )
+
+    if VERBOSE:
+        print(resp.output[-1].content[0].text)
+    return resp.output[-1].content[0].text
+
+
+def get_description_from_window(video_frames: list) -> str:
+    pass
+
+
 def get_summary_from_video(video_filepath: str) -> str:
     cap = cv2.VideoCapture(video_filepath)
     counter = 0
@@ -103,12 +169,15 @@ def get_summary_from_video(video_filepath: str) -> str:
     resp = client.responses.create(
         model="o4-mini",
         input=[
-            {"role": "user", "content": """Given the following frames:
+            {
+                "role": "user",
+                "content": """Given the following frames:
 
 - what is the image number where the [action] begins?
 - what is the image number where the [action] ends?
 
-[action] = picking up and putting down the can"""},
+[action] = picking up and putting down the can""",
+            },
             {
                 "role": "user",
                 "content": populate_image_content(frames),
@@ -124,6 +193,9 @@ def get_summary_from_video(video_filepath: str) -> str:
 def video_to_instruction(filepath: str, prompt_mode: str) -> str:
     if prompt_mode == "video_to_instructions":
         instruction: str = get_summary_from_video(filepath)
+        return instruction
+    if prompt_mode == "sliding_window":
+        instruction: str = get_summary_from_windows(filepath)
         return instruction
     else:
         cap = cv2.VideoCapture(filepath)
