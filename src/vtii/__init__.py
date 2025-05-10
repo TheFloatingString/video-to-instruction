@@ -7,6 +7,7 @@ from PIL import Image
 import io
 import base64
 import openai
+from threading import Thread
 import tqdm
 
 load_dotenv()
@@ -14,6 +15,8 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 
 VERBOSE = False
+
+DOWNSIZE_FRAMES = True
 
 CONFIG_PROMPTS = {
     "single_task": {
@@ -110,12 +113,19 @@ def get_summary_from_windows(video_filepath: str) -> str:
     return list_of_action_summaries
 
 
+def downsize_frame(frame):
+    return cv2.resize(frame, (224,224))
+
+
 def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
     frames = []
 
     for i in range(len(list_of_frames)):
         if i % 15 == 0:
             frames.append(list_of_frames[i])
+
+    if DOWNSIZE_FRAMES:
+        frames = [downsize_frame(frame) for frame in frames]
 
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     if VERBOSE:
