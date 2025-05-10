@@ -15,3 +15,5 @@ wheels/
 # .png files
 *.png
 
+# ignore log files
+*.log

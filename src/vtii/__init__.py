@@ -19,7 +19,7 @@ OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 
 VERBOSE = False
 
-DOWNSIZE_FRAMES = True
+DOWNSIZE_FRAMES = False
 
 CONFIG_PROMPTS = {
     "single_task": {
@@ -164,10 +164,10 @@ def thread_get_summary_from_sliding_window_frame(
     global main_list
     frames = []
 
-    with open(PYYAML_FILEPATH, 'r') as fp:
+    with open(PYYAML_FILEPATH, "r") as fp:
         data_config = yaml.safe_load(fp)
 
-    actions_list = list(data_config['v1']['actions'])
+    actions_list = list(data_config["v1"]["actions"])
     if VERBOSE:
         print(f"actions_list: {str(actions_list)}")
 
@@ -286,17 +286,30 @@ def get_summary_from_video(video_filepath: str) -> str:
     return resp.output[-1].content[0].text
 
 
-def point_and_identify(video_filepath:str)->str:
-    cap = cv2.VideoCapture(video_filepath)
-    counter = 0
+def point_and_identify(video_filepath: str = None, user_frames=None) -> str:
     frames = []
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        counter += 1
-        if counter % 15 == 0:
-            frames.append(frame)
+    if user_frames is not None:
+        counter = 0
+        for i in range(len(user_frames)):
+            if counter % 20 == 0:
+                if DOWNSIZE_FRAMES:
+                    frames.append(downsize_frame(user_frames[i]))
+                else:
+                    frames.append(user_frames[i])
+            counter += 1
+    else:
+        counter = 0
+        cap = cv2.VideoCapture(video_filepath)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            counter += 1
+            if counter % 20 == 0:
+                if DOWNSIZE_FRAMES:
+                    frames.append(downsize_frame(frame))
+                else:
+                    frames.append(frame)
 
     for i in tqdm.trange(len(frames)):
         cv2.imwrite(f"tmp-{i}.png", frames[i])
@@ -321,6 +334,7 @@ def point_and_identify(video_filepath:str)->str:
     if VERBOSE:
         print(resp.output[-1].content[0].text)
     return resp.output[-1].content[0].text
+
 
 def video_to_instruction(filepath: str, prompt_mode: str) -> str:
     if prompt_mode == "video_to_instructions":
@@ -354,4 +368,3 @@ def video_to_instruction(filepath: str, prompt_mode: str) -> str:
         if VERBOSE:
             print(instruction)
         return instruction
-
