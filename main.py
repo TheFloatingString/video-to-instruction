@@ -14,6 +14,18 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 
 
+CONFIG_PROMPTS = {
+    "single_task": {
+        "frame_prompt": "what is in the following video frame? Specifically mention if there are hands present, and what the hands are doing. ",
+        "summary_prompt": "The following are textual descriptions of video frames, separated by a '---'. What is one sentence that summarizes an action that a robot needs to take to perform the action, knowing that the hand represents what the robot arm should be doing? Only respond with a single sentence that describes the robot action, in a sentence that follows the following structure: <object> <verb> <descriptor>. \n",
+    },
+    "multiple_tasks": {
+        "frame_prompt": "what is in the following video frame? Specifically mention if there are hands present, and what the hands are doing. Also describe each item in the frame, and its colour. Give each object a unique and intuitive descriptor. Mention what unique objects the hands are acting on, if present.",
+        "summary_prompt": "The following are textual descriptions of video frames, separated by a '---'.  Determine how many actions are represented in the following descriptions. For each action, use a short and concise sentence with the following structure: <object> <verb> <descriptor>. Return with a numbered list, but nothing else. \n",
+    },
+}
+
+
 def numpy_to_base64(img_array):
     pil_img = Image.fromarray(img_array)
     buffered = io.BytesIO()
@@ -23,7 +35,7 @@ def numpy_to_base64(img_array):
     return f"data:image/png;base64,{base64_img}"
 
 
-def get_description_for_frame(frame: np.ndarray) -> str:
+def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
     image_data_url = numpy_to_base64(frame)
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     resp = client.responses.create(
@@ -31,7 +43,7 @@ def get_description_for_frame(frame: np.ndarray) -> str:
         input=[
             {
                 "role": "user",
-                "content": "what is in the following video frame? Specifically mention if there are hands present, and what the hands are doing. ",
+                "content": CONFIG_PROMPTS[prompt_mode]["frame_prompt"],
             },
             {
                 "role": "user",
@@ -43,8 +55,10 @@ def get_description_for_frame(frame: np.ndarray) -> str:
     return resp.output[0].content[0].text
 
 
-def get_summary_from_frame_descriptions(list_of_descriptions: list[str]) -> str:
-    prompt_str = "The following are textual descriptions of video frames, separated by a '---'. What is one sentence that summarizes an action that a robot needs to take to perform the action, knowing that the hand represents what the robot arm should be doing? Only respond with a single sentence that describes the robot action, in a sentence that follows the following structure: <object> <verb> <descriptor>. \n"
+def get_summary_from_frame_descriptions(
+    list_of_descriptions: list[str], prompt_mode: str
+) -> str:
+    prompt_str = CONFIG_PROMPTS[prompt_mode]["summary_prompt"]
     for descr in list_of_descriptions:
         prompt_str += f"{descr}\n---"
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -57,7 +71,7 @@ def get_summary_from_frame_descriptions(list_of_descriptions: list[str]) -> str:
     return resp.output[0].content[0].text
 
 
-def video_to_instruction(filepath: str) -> str:
+def video_to_instruction(filepath: str, prompt_mode: str) -> str:
     cap = cv2.VideoCapture(filepath)
     counter = 0
     list_of_frame_descriptions = []
@@ -67,11 +81,13 @@ def video_to_instruction(filepath: str) -> str:
             break
         counter += 1
         if counter % 20 == 0:
-            frame_description = get_description_for_frame(frame)
+            frame_description = get_description_for_frame(frame, prompt_mode)
             list_of_frame_descriptions.append(frame_description)
             print(".", end="")
     print()
-    instruction = get_summary_from_frame_descriptions(list_of_frame_descriptions)
+    instruction = get_summary_from_frame_descriptions(
+        list_of_frame_descriptions, prompt_mode
+    )
     print(instruction)
     return instruction
 
@@ -79,5 +95,6 @@ def video_to_instruction(filepath: str) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("filepath")
+    parser.add_argument("prompt_mode")
     args = parser.parse_args()
-    video_to_instruction(args.filepath)
+    video_to_instruction(args.filepath, args.prompt_mode)
