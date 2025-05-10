@@ -4,7 +4,7 @@
 
 ```bash
 set X_OPENAI_API_KEY="<API KEY>"
-pip install git+https://github.com/TheFloatingString/video-to-instruction-demo.git
+pip install git+https://github.com/TheFloatingString/video-to-instruction.git
 ```
 
 And then in Python:
