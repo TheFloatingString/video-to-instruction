@@ -55,7 +55,7 @@ def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
     return resp.output[0].content[0].text
 
 
-def get_summary_from_frame_descriptions(
+def get_summary_from_frame_decscriptions(
     list_of_descriptions: list[str], prompt_mode: str
 ) -> str:
     prompt_str = CONFIG_PROMPTS[prompt_mode]["summary_prompt"]
@@ -71,25 +71,63 @@ def get_summary_from_frame_descriptions(
     return resp.output[0].content[0].text
 
 
-def video_to_instruction(filepath: str, prompt_mode: str) -> str:
-    cap = cv2.VideoCapture(filepath)
+def get_summary_from_video(video_filepath: str) -> str:
+    cap = cv2.VideoCapture(video_filepath)
     counter = 0
-    list_of_frame_descriptions = []
+    frames = []
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         counter += 1
         if counter % 20 == 0:
-            frame_description = get_description_for_frame(frame, prompt_mode)
-            list_of_frame_descriptions.append(frame_description)
-            print(".", end="")
-    print()
-    instruction = get_summary_from_frame_descriptions(
-        list_of_frame_descriptions, prompt_mode
+            frames.append(frame)
+
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    print(len(frames))
+    resp = client.responses.create(
+        model="o4-mini",
+        input=[
+            {"role": "user", "content": "Write concise instructions for a robot arm."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": numpy_to_base64(frame)}
+                    for frame in frames
+                ],
+            },
+        ],
     )
-    print(instruction)
-    return instruction
+    """
+    print(resp.output[0].content[0].text)
+    return resp.output[0].content[0].text
+    """
+    print(resp.output[-1].content[0].text)
+    return resp
+
+
+def video_to_instruction(filepath: str, prompt_mode: str) -> str:
+    if prompt_mode == "video_to_instructions":
+        get_summary_from_video(filepath)
+    else:
+        cap = cv2.VideoCapture(filepath)
+        counter = 0
+        list_of_frame_descriptions = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            counter += 1
+            if counter % 20 == 0:
+                frame_description = get_description_for_frame(frame, prompt_mode)
+                list_of_frame_descriptions.append(frame_description)
+                print(".", end="")
+        print()
+        instruction = get_summary_from_frame_descriptions(
+            list_of_frame_descriptions, prompt_mode
+        )
+        print(instruction)
+        return instruction
 
 
 if __name__ == "__main__":
