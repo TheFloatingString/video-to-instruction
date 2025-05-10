@@ -151,11 +151,6 @@ def get_summary_from_windows(video_filepath: str) -> str:
     for i in tqdm.trange(len(threads)):
         threads[i].join()
 
-        # action_summary = get_summary_from_sliding_window_frame(frames_window)
-        # print(action_summary)
-        # start += window_step_size
-        # end += window_step_size
-        # list_of_action_summaries.append(action_summary)
     return main_list
 
 
@@ -169,10 +164,10 @@ def thread_get_summary_from_sliding_window_frame(
     global main_list
     frames = []
 
-    with open(PYYAML_FILEPATH, "r") as fp:
+    with open(PYYAML_FILEPATH, 'r') as fp:
         data_config = yaml.safe_load(fp)
 
-    actions_list = list(data_config["v1"]["actions"])
+    actions_list = list(data_config['v1']['actions'])
     if VERBOSE:
         print(f"actions_list: {str(actions_list)}")
 
@@ -291,12 +286,51 @@ def get_summary_from_video(video_filepath: str) -> str:
     return resp.output[-1].content[0].text
 
 
+def point_and_identify(video_filepath:str)->str:
+    cap = cv2.VideoCapture(video_filepath)
+    counter = 0
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        counter += 1
+        if counter % 15 == 0:
+            frames.append(frame)
+
+    for i in tqdm.trange(len(frames)):
+        cv2.imwrite(f"tmp-{i}.png", frames[i])
+
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    if VERBOSE:
+        print(len(frames))
+    resp = client.responses.create(
+        model="o4-mini",
+        input=[
+            {
+                "role": "user",
+                "content": """Given the following video frames, what is the hand pointing to? Only return the name of what the hand is pointing to, return null if nothing is being pointed to - do not return anything else.""",
+            },
+            {
+                "role": "user",
+                "content": populate_image_content(frames),
+            },
+        ],
+    )
+
+    if VERBOSE:
+        print(resp.output[-1].content[0].text)
+    return resp.output[-1].content[0].text
+
 def video_to_instruction(filepath: str, prompt_mode: str) -> str:
     if prompt_mode == "video_to_instructions":
         instruction: str = get_summary_from_video(filepath)
         return instruction
-    if prompt_mode == "sliding_window":
+    elif prompt_mode == "sliding_window":
         instruction: str = get_summary_from_windows(filepath)
+        return instruction
+    elif prompt_mode == "point_and_identify":
+        instruction = point_and_identify(filepath)
         return instruction
     else:
         cap = cv2.VideoCapture(filepath)
@@ -321,10 +355,3 @@ def video_to_instruction(filepath: str, prompt_mode: str) -> str:
             print(instruction)
         return instruction
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("filepath")
-    parser.add_argument("prompt_mode")
-    args = parser.parse_args()
-    video_to_instruction(args.filepath, args.prompt_mode)
