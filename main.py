@@ -13,6 +13,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 
+
 def numpy_to_base64(img_array):
     pil_img = Image.fromarray(img_array)
     buffered = io.BytesIO()
@@ -21,36 +22,40 @@ def numpy_to_base64(img_array):
     base64_img = base64.b64encode(img_bytes).decode("utf-8")
     return f"data:image/png;base64,{base64_img}"
 
+
 def get_description_for_frame(frame: np.ndarray) -> str:
-    image_data_url=numpy_to_base64(frame)
+    image_data_url = numpy_to_base64(frame)
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     resp = client.responses.create(
-            model="gpt-4o-mini",
-            input=[
-                {"role":"user", "content":"what is in the following video frame? Specifically mention if there are hands present, and what the hands are doing. "},
-                {"role":"user", 
-                 "content": [
-
-                {"type": "input_image", "image_url": image_data_url}
-
-                     ]}
-            ]
-            )
+        model="gpt-4o-mini",
+        input=[
+            {
+                "role": "user",
+                "content": "what is in the following video frame? Specifically mention if there are hands present, and what the hands are doing. ",
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_image", "image_url": image_data_url}],
+            },
+        ],
+    )
     print(resp.output[0].content[0].text)
     return resp.output[0].content[0].text
+
 
 def get_summary_from_frame_descriptions(list_of_descriptions: list[str]) -> str:
     prompt_str = "The following are textual descriptions of video frames, separated by a '---'. What is one sentence that summarizes an action that a robot needs to take to perform the action, knowing that the hand represents what the robot arm should be doing? Only respond with a single sentence that describes the robot action, in a sentence that follows the following structure: <object> <verb> <descriptor>. \n"
     for descr in list_of_descriptions:
-        prompt_str+=f"{descr}\n---"
+        prompt_str += f"{descr}\n---"
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     resp = client.responses.create(
-            model="gpt-4.1",
-            input=[
-                {"role":"user", "content":prompt_str},
-            ]
-            )
+        model="gpt-4.1",
+        input=[
+            {"role": "user", "content": prompt_str},
+        ],
+    )
     return resp.output[0].content[0].text
+
 
 def video_to_instruction(filepath: str) -> str:
     cap = cv2.VideoCapture(filepath)
@@ -64,11 +69,12 @@ def video_to_instruction(filepath: str) -> str:
         if counter % 20 == 0:
             frame_description = get_description_for_frame(frame)
             list_of_frame_descriptions.append(frame_description)
-            print(".",end='')
+            print(".", end="")
     print()
     instruction = get_summary_from_frame_descriptions(list_of_frame_descriptions)
     print(instruction)
     return instruction
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
