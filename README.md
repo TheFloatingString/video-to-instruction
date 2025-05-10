@@ -20,6 +20,7 @@ List of video modes:
 - `single_task`: only returns a single task, text as context
 - `multiple_tasks`: returns multiple tasks, text as context
 - `video_to_instructions`: feeds an entire video to OpenAI
+- `sliding_window`: sliding window approach
 
 ## For development 
 
