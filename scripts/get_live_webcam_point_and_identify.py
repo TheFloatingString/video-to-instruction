@@ -1,4 +1,4 @@
-import cv2
+"import cv2
 import numpy as np
 
 from vtii import point_and_identify
@@ -8,6 +8,12 @@ import time
 import requests
 import queue
 from concurrent.futures import ThreadPoolExecutor
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+URL = "https://desktop-dtohfqr.taile61ba3.ts.net
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -26,7 +32,9 @@ def submit_api_call(frames):
     """Submit API call asynchronously"""
     def worker():
         try:
-            result = point_and_identify(user_frames=frames)
+            result: str = point_and_identify(user_frames=frames)
+            payload = {"content": result}
+            r = requests.post(f"{URL}/api/point", json=payload)
             results_queue.put(("success", result))
         except Exception as e:
             results_queue.put(("error", str(e)))
