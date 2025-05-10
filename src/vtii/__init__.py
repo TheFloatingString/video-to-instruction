@@ -73,6 +73,15 @@ def get_summary_from_frame_descriptions(
     return resp.output[0].content[0].text
 
 
+def populate_image_content(frames):
+    content = []
+
+    for idx, frame in enumerate(frames):
+        content.append({"type": "input_text", "text": f"image {idx}"})
+        content.append({"type": "input_image", "image_url": numpy_to_base64(frame)})
+
+    return content
+
 def get_summary_from_video(video_filepath: str) -> str:
     cap = cv2.VideoCapture(video_filepath)
     counter = 0
@@ -82,8 +91,11 @@ def get_summary_from_video(video_filepath: str) -> str:
         if not ret:
             break
         counter += 1
-        if counter % 20 == 0:
+        if counter % 15 == 0:
             frames.append(frame)
+
+    for i in tqdm.trange(len(frames)):
+        cv2.imwrite(f"tmp-{i}.png", frames[i])
 
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
     if VERBOSE:
@@ -91,25 +103,28 @@ def get_summary_from_video(video_filepath: str) -> str:
     resp = client.responses.create(
         model="o4-mini",
         input=[
-            {"role": "user", "content": "Write concise instructions for a robot arm."},
+            {"role": "user", "content": """Given the following frames:
+
+- what is the image number where the [action] begins?
+- what is the image number where the [action] ends?
+
+[action] = picking up and putting down the can"""},
             {
                 "role": "user",
-                "content": [
-                    {"type": "input_image", "image_url": numpy_to_base64(frame)}
-                    for frame in frames
-                ],
+                "content": populate_image_content(frames),
             },
         ],
     )
 
     if VERBOSE:
         print(resp.output[-1].content[0].text)
-    return resp
+    return resp.output[-1].content[0].text
 
 
 def video_to_instruction(filepath: str, prompt_mode: str) -> str:
     if prompt_mode == "video_to_instructions":
-        get_summary_from_video(filepath)
+        instruction: str = get_summary_from_video(filepath)
+        return instruction
     else:
         cap = cv2.VideoCapture(filepath)
         counter = 0

@@ -1,0 +1,15 @@
+v1:
+  actions:
+    pick:
+      parameters:
+        - target
+        - description
+    flip:
+      parameters:
+        - target
+    push_over:
+      parameters:
+        - target
+    place_upright:
+      parameters:
+        -target
