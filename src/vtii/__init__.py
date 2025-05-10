@@ -30,6 +30,9 @@ CONFIG_PROMPTS = {
 }
 
 
+main_list = []
+
+
 def numpy_to_base64(img_array):
     pil_img = Image.fromarray(img_array)
     buffered = io.BytesIO()
@@ -87,7 +90,7 @@ def populate_image_content(frames):
 
 
 def get_summary_from_windows(video_filepath: str) -> str:
-    list_of_action_summaries = []
+    # list_of_action_summaries = []
     cap = cv2.VideoCapture(video_filepath)
     frames = []
     while True:
@@ -95,26 +98,104 @@ def get_summary_from_windows(video_filepath: str) -> str:
         if not ret:
             break
         frames.append(frame)
-    print("video loaded.")
+    if VERBOSE:
+        print("video loaded.")
     window_length = 120
     n_windows = int(
         2 * len(frames) / window_length
     )  # TODO: there might be clipping here
     window_step_size = int(window_length / 2)  # TODO: there might be clipping here
+    global main_list
+    main_list = [None] * n_windows
     start = 0
     end = window_step_size
+
+    threads = []
+    main_list_idx = 0
+
     for i in tqdm.trange(n_windows):
         frames_window = frames[start:end]
-        action_summary = get_summary_from_sliding_window_frame(frames_window)
-        print(action_summary)
-        start += window_step_size
-        end += window_step_size
-        list_of_action_summaries.append(action_summary)
-    return list_of_action_summaries
+        threads.append(
+            Thread(
+                target=thread_get_summary_from_sliding_window_frame,
+                args=(frames_window, main_list_idx),
+            )
+        )
+        main_list_idx += 1
+
+    N_WORKERS = 50
+    if n_windows < N_WORKERS:
+        N_WORKERS = n_windows
+
+    for i in tqdm.trange(int(n_windows / N_WORKERS)):
+        if VERBOSE:
+            print(i)
+        sublist_threads = threads[:N_WORKERS]
+        for t in sublist_threads:
+            t.start()
+        for t in sublist_threads:
+            t.join()
+        for i in range(N_WORKERS):
+            threads.pop(0)
+            if VERBOSE:
+                print(threads)
+
+    for i in tqdm.trange(len(threads)):
+        threads[i].start()
+    for i in tqdm.trange(len(threads)):
+        threads[i].join()
+
+        # action_summary = get_summary_from_sliding_window_frame(frames_window)
+        # print(action_summary)
+        # start += window_step_size
+        # end += window_step_size
+        # list_of_action_summaries.append(action_summary)
+    return main_list
 
 
 def downsize_frame(frame):
-    return cv2.resize(frame, (224,224))
+    return cv2.resize(frame, (224, 224))
+
+
+def thread_get_summary_from_sliding_window_frame(
+    list_of_frames: list, main_list_idx: int
+) -> str:
+    global main_list
+    frames = []
+
+    for i in range(len(list_of_frames)):
+        if i % 15 == 0:
+            frames.append(list_of_frames[i])
+
+    if DOWNSIZE_FRAMES:
+        frames = [downsize_frame(frame) for frame in frames]
+
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    if VERBOSE:
+        print(len(frames))
+    resp = client.responses.create(
+        model="o4-mini",
+        input=[
+            {
+                "role": "user",
+                "content": """Given the following frames:
+
+- what is the image number where the [action] begins?
+- what is the image number where the [action] ends?
+
+[action] = picking up and putting down the can""",
+            },
+            {
+                "role": "user",
+                "content": populate_image_content(frames),
+            },
+        ],
+    )
+
+    if VERBOSE:
+        print(resp.output[-1].content[0].text)
+    main_list[main_list_idx] = resp.output[-1].content[0].text
+    # return resp.output[-1].content[0].text
 
 
 def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
