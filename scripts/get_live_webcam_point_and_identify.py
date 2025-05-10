@@ -99,7 +99,7 @@ def f2(main_frames, interval_seconds, state_dict):
 def f3(state_dict):
     while True:
         fs = 44100  # Sample rate
-        channels = 2
+        channels = 1
         filename = "tmp.wav"
         # audio = sd.rec(int(interval_seconds * fs), samplerate=fs, channels=channels)
         # sd.wait()
@@ -144,7 +144,7 @@ def f4(state_dict):
             # logger.info(f"audio transcription: {transcription}")
             logger.info(f">>>>> f4_count: {str(state_dict)}")
 
-            # state_dict["f4_count"] += 1
+            state_dict["f4_count"] += 1
 
 
 if __name__ == "__main__":
