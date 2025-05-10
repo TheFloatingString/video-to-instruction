@@ -1,4 +1,4 @@
-"import cv2
+import cv2
 import numpy as np
 
 from vtii import point_and_identify
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-URL = "https://desktop-dtohfqr.taile61ba3.ts.net
+URL = "https://desktop-dtohfqr.taile61ba3.ts.net"
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -44,7 +44,7 @@ def submit_api_call(frames):
 
 def f1(main_frames):
     logger.info("Starting webcam thread...")
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     while True:
         ret, frame = cap.read()
         main_frames.append(frame)
