@@ -11,15 +11,19 @@ import openai
 from threading import Thread
 import tqdm
 import yaml
+import logging
 
 
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
-
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 VERBOSE = False
 
 DOWNSIZE_FRAMES = False
+
+logger = logging.getLogger("vtii")
+logger.setLevel(logging.INFO)
 
 CONFIG_PROMPTS = {
     "single_task": {
@@ -50,7 +54,6 @@ def numpy_to_base64(img_array):
 
 def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
     image_data_url = numpy_to_base64(frame)
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
     resp = client.responses.create(
         model="gpt-4o-mini",
         input=[
@@ -64,8 +67,7 @@ def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
             },
         ],
     )
-    if VERBOSE:
-        print(resp.output[0].content[0].text)
+    logger.info(resp.output[0].content[0].text)
     return resp.output[0].content[0].text
 
 
@@ -75,7 +77,6 @@ def get_summary_from_frame_descriptions(
     prompt_str = CONFIG_PROMPTS[prompt_mode]["summary_prompt"]
     for descr in list_of_descriptions:
         prompt_str += f"{descr}\n---"
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
     resp = client.responses.create(
         model="gpt-4.1",
         input=[
@@ -96,7 +97,6 @@ def populate_image_content(frames):
 
 
 def get_summary_from_windows(video_filepath: str) -> str:
-    # list_of_action_summaries = []
     cap = cv2.VideoCapture(video_filepath)
     frames = []
     while True:
@@ -104,8 +104,7 @@ def get_summary_from_windows(video_filepath: str) -> str:
         if not ret:
             break
         frames.append(frame)
-    if VERBOSE:
-        print("video loaded.")
+    logger.info("video loaded.")
     window_length = 120
     n_windows = int(
         2 * len(frames) / window_length
@@ -134,8 +133,7 @@ def get_summary_from_windows(video_filepath: str) -> str:
         N_WORKERS = n_windows
 
     for i in tqdm.trange(int(n_windows / N_WORKERS)):
-        if VERBOSE:
-            print(i)
+        logger.info(i)
         sublist_threads = threads[:N_WORKERS]
         for t in sublist_threads:
             t.start()
@@ -143,8 +141,7 @@ def get_summary_from_windows(video_filepath: str) -> str:
             t.join()
         for i in range(N_WORKERS):
             threads.pop(0)
-            if VERBOSE:
-                print(threads)
+            logger.info(threads)
 
     for i in tqdm.trange(len(threads)):
         threads[i].start()
@@ -168,8 +165,7 @@ def thread_get_summary_from_sliding_window_frame(
         data_config = yaml.safe_load(fp)
 
     actions_list = list(data_config["v1"]["actions"])
-    if VERBOSE:
-        print(f"actions_list: {str(actions_list)}")
+    logger.info(f"actions_list: {str(actions_list)}")
 
     for i in range(len(list_of_frames)):
         if i % 15 == 0:
@@ -178,9 +174,7 @@ def thread_get_summary_from_sliding_window_frame(
     if DOWNSIZE_FRAMES:
         frames = [downsize_frame(frame) for frame in frames]
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    if VERBOSE:
-        print(len(frames))
+    logger.info(len(frames))
     resp = client.responses.create(
         model="o4-mini",
         input=[
@@ -197,10 +191,8 @@ Given the following frames, return one of the following actions, or say null if 
         ],
     )
 
-    if VERBOSE:
-        print(resp.output[-1].content[0].text)
+    logger.info(resp.output[-1].content[0].text)
     main_list[main_list_idx] = resp.output[-1].content[0].text
-    # return resp.output[-1].content[0].text
 
 
 def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
@@ -213,9 +205,7 @@ def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
     if DOWNSIZE_FRAMES:
         frames = [downsize_frame(frame) for frame in frames]
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    if VERBOSE:
-        print(len(frames))
+    logger.info(len(frames))
     resp = client.responses.create(
         model="o4-mini",
         input=[
@@ -235,8 +225,7 @@ def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
         ],
     )
 
-    if VERBOSE:
-        print(resp.output[-1].content[0].text)
+    logger.info(resp.output[-1].content[0].text)
     return resp.output[-1].content[0].text
 
 
@@ -259,9 +248,7 @@ def get_summary_from_video(video_filepath: str) -> str:
     for i in tqdm.trange(len(frames)):
         cv2.imwrite(f"tmp-{i}.png", frames[i])
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    if VERBOSE:
-        print(len(frames))
+    logger.info(len(frames))
     resp = client.responses.create(
         model="o4-mini",
         input=[
@@ -281,12 +268,12 @@ def get_summary_from_video(video_filepath: str) -> str:
         ],
     )
 
-    if VERBOSE:
-        print(resp.output[-1].content[0].text)
+    logger.info(resp.output[-1].content[0].text)
     return resp.output[-1].content[0].text
 
 
 def point_and_identify(video_filepath: str = None, user_frames=None) -> str:
+    logger.info("point_and_identify")
     frames = []
     if user_frames is not None:
         counter = 0
@@ -314,9 +301,7 @@ def point_and_identify(video_filepath: str = None, user_frames=None) -> str:
     for i in tqdm.trange(len(frames)):
         cv2.imwrite(f"tmp-{i}.png", frames[i])
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    if VERBOSE:
-        print(len(frames))
+    logger.info(len(frames))
     resp = client.responses.create(
         model="o4-mini",
         input=[
@@ -331,8 +316,7 @@ def point_and_identify(video_filepath: str = None, user_frames=None) -> str:
         ],
     )
 
-    if VERBOSE:
-        print(resp.output[-1].content[0].text)
+    logger.info(resp.output[-1].content[0].text)
     return resp.output[-1].content[0].text
 
 
@@ -358,13 +342,10 @@ def video_to_instruction(filepath: str, prompt_mode: str) -> str:
             if counter % 20 == 0:
                 frame_description = get_description_for_frame(frame, prompt_mode)
                 list_of_frame_descriptions.append(frame_description)
-                if VERBOSE:
-                    print(".", end="")
-        if VERBOSE:
-            print()
+                logger.info(".", end="")
+        logger.info("")
         instruction = get_summary_from_frame_descriptions(
             list_of_frame_descriptions, prompt_mode
         )
-        if VERBOSE:
-            print(instruction)
+        logger.info(instruction)
         return instruction
