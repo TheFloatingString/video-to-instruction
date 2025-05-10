@@ -16,4 +16,5 @@ if __name__ == "__main__":
     parser.add_argument("filepath")
     parser.add_argument("prompt_mode")
     args = parser.parse_args()
-    vtii.video_to_instruction(args.filepath, args.prompt_mode)
+    instruction:str = vtii.video_to_instruction(args.filepath, args.prompt_mode)
+    print(instruction)

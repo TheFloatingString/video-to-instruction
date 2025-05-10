@@ -13,6 +13,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 
+VERBOSE = False
 
 CONFIG_PROMPTS = {
     "single_task": {
@@ -51,7 +52,8 @@ def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
             },
         ],
     )
-    print(resp.output[0].content[0].text)
+    if VERBOSE:
+        print(resp.output[0].content[0].text)
     return resp.output[0].content[0].text
 
 
@@ -84,7 +86,8 @@ def get_summary_from_video(video_filepath: str) -> str:
             frames.append(frame)
 
     client = openai.OpenAI(api_key=OPENAI_API_KEY)
-    print(len(frames))
+    if VERBOSE:
+        print(len(frames))
     resp = client.responses.create(
         model="o4-mini",
         input=[
@@ -98,11 +101,9 @@ def get_summary_from_video(video_filepath: str) -> str:
             },
         ],
     )
-    """
-    print(resp.output[0].content[0].text)
-    return resp.output[0].content[0].text
-    """
-    print(resp.output[-1].content[0].text)
+
+    if VERBOSE:
+        print(resp.output[-1].content[0].text)
     return resp
 
 
@@ -121,12 +122,15 @@ def video_to_instruction(filepath: str, prompt_mode: str) -> str:
             if counter % 20 == 0:
                 frame_description = get_description_for_frame(frame, prompt_mode)
                 list_of_frame_descriptions.append(frame_description)
-                print(".", end="")
-        print()
+                if VERBOSE:
+                    print(".", end="")
+        if VERBOSE:
+            print()
         instruction = get_summary_from_frame_descriptions(
             list_of_frame_descriptions, prompt_mode
         )
-        print(instruction)
+        if VERBOSE:
+            print(instruction)
         return instruction
 
 
