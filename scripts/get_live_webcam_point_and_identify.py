@@ -10,10 +10,11 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
-URL = "https://desktop-dtohfqr.taile61ba3.ts.net"
+URL = os.getenv("SERVER_URI", "https://desktop-dtohfqr.taile61ba3.ts.net")
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -44,7 +45,7 @@ def submit_api_call(frames):
 
 def f1(main_frames):
     logger.info("Starting webcam thread...")
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(os.getenv("CV2_CAP",0))
     while True:
         ret, frame = cap.read()
         main_frames.append(frame)
