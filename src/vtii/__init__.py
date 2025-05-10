@@ -5,10 +5,13 @@ import argparse
 from dotenv import load_dotenv
 from PIL import Image
 import io
+import os
 import base64
 import openai
 from threading import Thread
 import tqdm
+import yaml
+
 
 load_dotenv()
 
@@ -28,6 +31,9 @@ CONFIG_PROMPTS = {
         "summary_prompt": "The following are textual descriptions of video frames, separated by a '---'.  Determine how many actions are represented in the following descriptions. For each action, use a short and concise sentence with the following structure: <object> <verb> <descriptor>. Return with a numbered list, but nothing else. \n",
     },
 }
+
+module_dir = os.path.dirname(os.path.abspath(__file__))
+PYYAML_FILEPATH = os.path.join(module_dir, "registry", "actions.yaml")
 
 
 main_list = []
@@ -163,6 +169,13 @@ def thread_get_summary_from_sliding_window_frame(
     global main_list
     frames = []
 
+    with open(PYYAML_FILEPATH, "r") as fp:
+        data_config = yaml.safe_load(fp)
+
+    actions_list = list(data_config["v1"]["actions"])
+    if VERBOSE:
+        print(f"actions_list: {str(actions_list)}")
+
     for i in range(len(list_of_frames)):
         if i % 15 == 0:
             frames.append(list_of_frames[i])
@@ -178,12 +191,9 @@ def thread_get_summary_from_sliding_window_frame(
         input=[
             {
                 "role": "user",
-                "content": """Given the following frames:
-
-- what is the image number where the [action] begins?
-- what is the image number where the [action] ends?
-
-[action] = picking up and putting down the can""",
+                "content": f"""
+Given the following frames, return one of the following actions, or say null if it does not apply: {actions_list}
+""",
             },
             {
                 "role": "user",
