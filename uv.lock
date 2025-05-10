@@ -569,9 +569,9 @@ wheels = [
 ]
 
 [[package]]
-name = "video-to-instruction-demo"
+name = "vtii"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "openai" },
     { name = "opencv-python" },

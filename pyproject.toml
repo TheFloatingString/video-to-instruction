@@ -1,5 +1,5 @@
 [project]
-name = "video-to-instruction-demo"
+name = "vtii"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -12,3 +12,7 @@ dependencies = [
     "ruff>=0.11.9",
     "tqdm>=4.67.1",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
