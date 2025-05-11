@@ -10,6 +10,10 @@ import threading
 import datetime
 import time
 from dotenv import load_dotenv
+import cv2
+import threading
+from video_buffer import VideoCaptureBuffer
+from openai_api import image_to_text
 
 # Load environment variables
 load_dotenv()
@@ -52,6 +56,13 @@ class VoiceAssistant:
         # WebSocket server for web clients
         self.web_clients = set()
         self.web_server = None
+        
+        # Video buffer for camera frames
+        self.video_buffer = None
+        self.video_buffer_thread = None
+        self.video_buffer_seconds = 5  # How many seconds of frames to keep
+        self.video_fps = 30  # Default FPS, can be made configurable
+        self.video_source = 0  # Default camera index, can be made configurable
         
     def add_to_history(self, role, content, content_type="text", metadata=None):
         """Add a message to conversation history"""
@@ -166,50 +177,46 @@ class VoiceAssistant:
                 "input_audio_transcription": {
                     "model": "whisper-1"
                 },
-                # Function calling configuration
+                # UPDATED FUNCTION CALLS
                 "tools": [
                     {
                         "type": "function",
-                        "name": "get_current_time",
-                        "description": "Get the current time",
+                        "name": "pick_up_can",
+                        "description": "Control the robot arm to pick up a can of a specified type and place it on the tray.",
                         "parameters": {
                             "type": "object",
-                            "properties": {},
+                            "properties": {
+                                "can_type": {
+                                    "type": "string",
+                                    "description": "The type of can to pick up (e.g., 'Coke', 'Pepsi', 'Sprite')."
+                                }
+                            },
+                            "required": ["can_type"]
+                        }
+                    },
+                    {
+                        "type": "function",
+                        "name": "describe_scene",
+                        "description": "Describe what is currently visible in the camera's field of view.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "instructions": {
+                                    "type": "string",
+                                    "description": "Custom instructions for describing the scene."
+                                }
+                            },
                             "required": []
                         }
                     },
                     {
                         "type": "function",
-                        "name": "calculate_expression",
-                        "description": "Calculate a mathematical expression",
+                        "name": "identify_pointed_object",
+                        "description": "Identify the object that is currently being pointed at in the camera's view.",
                         "parameters": {
                             "type": "object",
-                            "properties": {
-                                "expression": {
-                                    "type": "string",
-                                    "description": "The mathematical expression to calculate (e.g., '2+2' or '10*5')"
-                                }
-                            },
-                            "required": ["expression"]
-                        }
-                    },
-                    {
-                        "type": "function",
-                        "name": "save_note",
-                        "description": "Save a note to the conversation history",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "note": {
-                                    "type": "string",
-                                    "description": "The note content to save"
-                                },
-                                "title": {
-                                    "type": "string",
-                                    "description": "Optional title for the note"
-                                }
-                            },
-                            "required": ["note"]
+                            "properties": {},
+                            "required": []
                         }
                     }
                 ],
@@ -312,6 +319,24 @@ class VoiceAssistant:
         self.output_thread.daemon = True
         self.output_thread.start()
     
+    def start_video_buffer(self):
+        """Start the video capture buffer for camera frames."""
+        if self.video_buffer is None:
+            self.video_buffer = VideoCaptureBuffer(
+                source=self.video_source,
+                fps=self.video_fps,
+                buffer_seconds=self.video_buffer_seconds
+            )
+            self.video_buffer.start()
+            print(f"📷 Video buffer started (source={self.video_source}, fps={self.video_fps}, seconds={self.video_buffer_seconds})")
+
+    def stop_video_buffer(self):
+        """Stop the video capture buffer."""
+        if self.video_buffer:
+            self.video_buffer.stop()
+            self.video_buffer = None
+            print("📷 Video buffer stopped.")
+    
     async def handle_function_call(self, function_name, call_id, arguments):
         """Handle function calls from the assistant"""
         try:
@@ -337,6 +362,40 @@ class VoiceAssistant:
                 # Save to conversation history
                 self.add_to_history("user", note, "note", {"title": title})
                 output = json.dumps({"status": "saved", "title": title})
+                
+            elif function_name == "pick_up_can":
+                args = json.loads(arguments)
+                can_type = args.get("can_type", "")
+                output = json.dumps({"status": "success", "can_type": can_type})
+                
+            elif function_name == "describe_scene":
+                # Get the latest frame from the video buffer
+                frame = None
+                custom_instructions = "Describe the scene in this image as quickly and concisely as possible."
+                try:
+                    args = json.loads(arguments)
+                    if "instructions" in args and args["instructions"].strip():
+                        custom_instructions = args["instructions"]
+                except Exception:
+                    pass
+                if self.video_buffer:
+                    frames = self.video_buffer.get_frames()
+                    if frames:
+                        frame = frames[-1]
+                if frame is not None:
+                    import cv2, base64
+                    _, buffer = cv2.imencode('.png', frame)
+                    b64_image = base64.b64encode(buffer).decode('utf-8')
+                    data_url = f"data:image/png;base64,{b64_image}"
+                    description = image_to_text(data_url, instructions=custom_instructions)
+                    if not description:
+                        description = "Could not get scene description."
+                else:
+                    description = "No camera frame available."
+                output = json.dumps({"description": description})
+                
+            elif function_name == "identify_pointed_object":
+                output = json.dumps({"object": "Pointed object placeholder"})
                 
             else:
                 output = json.dumps({"error": f"Unknown function: {function_name}"})
@@ -449,6 +508,9 @@ class VoiceAssistant:
         """Clean up resources"""
         print("\nCleaning up...")
         
+        # Stop video buffer
+        self.stop_video_buffer()
+        
         # Stop audio output
         self.output_running = False
         if self.output_thread:
@@ -472,7 +534,10 @@ class VoiceAssistant:
             await self.connect()
             print("✅ Connected to OpenAI Realtime API")
             print(f"📋 System prompt: {self.system_prompt}")
-            print("🔧 Available functions: get_current_time, calculate_expression, save_note")
+            print("🔧 Available functions: pick_up_can, describe_scene, identify_pointed_object")
+            
+            # Start the video buffer for camera frames
+            self.start_video_buffer()
             
             # Start the audio output thread
             self.start_audio_output()
@@ -498,14 +563,14 @@ class VoiceAssistant:
             await self.cleanup()
 
 async def main():
-    # You can customize the system prompt here
-    system_prompt = """You are a helpful voice assistant. You can:
-    1. Have natural conversations
-    2. Tell the current time
-    3. Do mathematical calculations
-    4. Save notes for later
-    
-    Be concise and friendly in your responses."""
+    # UPDATED SYSTEM PROMPT
+    system_prompt = """You are a voice-controlled assistant for a robot arm with a connected camera. You can:
+1. Have natural conversations with the user.
+2. Control the robot arm to pick up a can of a specified type (e.g., Le Mate, Redbull, Coke) and place it on the tray.
+3. Describe what is currently visible in the camera's field of view.
+4. Identify the object that is being pointed at in the camera's view.
+
+When the user asks you to pick up a can, always confirm the type of can before proceeding. Use the describe_scene and identify_pointed_object functions to help answer questions about the environment. Be concise, helpful, and always clarify if you are unsure about the user's intent."""
     
     assistant = VoiceAssistant(system_prompt=system_prompt)
     
@@ -524,7 +589,7 @@ if __name__ == "__main__":
     print("Features:")
     print("  • Conversation history tracking")
     print("  • Custom system prompts")
-    print("  • Function calling (time, calculator, notes)")
+    print("  • Function calling (pick_up_can, describe_scene, identify_pointed_object)")
     print("  • WebSocket server for web clients")
     print("----------------------------------------")
     print("Make sure you have your OPENAI_API_KEY in a .env file")

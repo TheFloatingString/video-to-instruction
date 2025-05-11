@@ -52,43 +52,36 @@ def audio_to_text(audio_chunks, sample_rate):
         logger.error(f"Error during OpenAI audio transcription: {e}", exc_info=True)
         return None
 
-def image_to_text(image_data):
+def image_to_text(image_data_url, instructions="Describe the scene in this image as quickly and concisely as possible."):
     """
-    Placeholder for converting image data to text using OpenAI's vision models.
-
+    Converts an image (as a data URL) to a text description using OpenAI's vision model (gpt-4.1).
     Args:
-        image_data: The image data (format to be determined, e.g., bytes, path, PIL Image).
-
+        image_data_url (str): The image as a data URL (e.g., 'data:image/png;base64,...').
+        instructions (str): Custom instructions for what to extract from the image.
     Returns:
         str: Description of the image, or None if an error occurs.
     """
     if not client:
         logger.error("OpenAI client not initialized. Cannot process image.")
         return None
-    logger.info("image_to_text function called (placeholder).")
-    # Example (requires appropriate model and API usage for vision):
-    # try:
-    #     response = client.chat.completions.create(
-    #         model="gpt-4-vision-preview", # Or other vision-capable model
-    #         messages=[
-    #             {
-    #                 "role": "user",
-    #                 "content": [
-    #                     {"type": "text", "text": "What's in this image?"},
-    #                     {
-    #                         "type": "image_url",
-    #                         "image_url": {"url": f"data:image/jpeg;base64,{base64_encoded_image_data}"},
-    #                     },
-    #                 ],
-    #             }
-    #         ],
-    #         max_tokens=300,
-    #     )
-    #     return response.choices[0].message.content
-    # except Exception as e:
-    #     logger.error(f"Error during OpenAI image processing: {e}")
-    #     return None
-    return "Image description placeholder"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1",  # Use vision-capable model
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instructions},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ],
+                }
+            ],
+            max_tokens=200,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Error during OpenAI image processing: {e}")
+        return None
 
 def generate_response(prompt, history=None):
     """
@@ -147,9 +140,13 @@ if __name__ == '__main__':
     # else:
     #     logger.error("Test audio_to_text failed.")
 
-    # Test image_to_text (placeholder)
-    # vision_description = image_to_text("dummy_image_data")
-    # logger.info(f"Test image_to_text (placeholder): '{vision_description}'")
+    # Test image_to_text
+    test_image_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA..."
+    vision_description = image_to_text(test_image_data_url)
+    if vision_description:
+        logger.info(f"Test image_to_text: '{vision_description}'")
+    else:
+        logger.error("Test image_to_text failed.")
 
     # Test generate_response
     test_prompt = "Hello, who are you?"
