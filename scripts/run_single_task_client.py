@@ -6,12 +6,15 @@ from threading import Thread
 import time
 import vtii
 import requests
-import os 
+import os
 import dotenv
 
 from stttmp import get_text_from_speech
 
 dotenv.load_dotenv()
+
+# URL of your FastAPI endpoint for receiving the video stream
+MIRROR_SERVER_URL = "http://localhost:8000/upload_frame"
 
 INTERVAL = 10
 URL = os.getenv("SERVER_URI", "https://desktop-dtohfqr.taile61ba3.ts.net")
@@ -37,6 +40,17 @@ def record_video(state_dict):
     while True:
         ret, frame = cap.read()
         state_dict["frames"].append(frame)
+
+        # Encode frame as JPEG
+        _, img_encoded = cv2.imencode('.jpg', frame)
+        byte_frame = img_encoded.tobytes()
+
+        # Send the frame to the FastAPI server
+        response = requests.post(MIRROR_SERVER_URL, files={"frame": byte_frame})
+
+        # Optional: Print the response for debugging
+        print("Server Response:", response.status_code)
+        
         if time.time() - start > INTERVAL:
             break
 
@@ -61,6 +75,7 @@ def main():
     for t in threads:
         t.join()
     transcript = get_text_from_speech()
+    resp = requests.post(f"{URL}/api/tts", json={"content":transcript, "idx":0})
     logger.info(f"transcript: {transcript}")
     action = vtii.get_action_from_frames_and_transcript(state_dict["frames"], transcript)
     logger.info(f"action: {action}")
