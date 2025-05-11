@@ -8,7 +8,8 @@ import vtii
 import requests
 import os
 import dotenv
-
+from vtii.simple_voice_agent import main as voice_agent_main
+import asyncio
 from stttmp import get_text_from_speech
 
 dotenv.load_dotenv()
@@ -66,6 +67,15 @@ def record_audio(state_dict):
     # stop microphone
     write(filename, fs, myrecording)
 
+def f3(state_dict):
+    asyncio.run(voice_agent_main(None))
+    
+def f4(state_dict, transcript):
+    action = vtii.get_action_from_frames_and_transcript(state_dict["frames"], transcript)
+    logger.info(f"action: {action}")
+    resp = requests.post(f"{URL}/api/action", json={"content": action})
+    logger.info(f"HTTP resp: {resp}")
+
 def main():
     t1 = Thread(target=record_video, args=(state_dict,))
     t2 = Thread(target=record_audio, args=(state_dict,))
@@ -77,10 +87,24 @@ def main():
     transcript = get_text_from_speech()
     resp = requests.post(f"{URL}/api/tts", json={"content":transcript, "idx":0})
     logger.info(f"transcript: {transcript}")
-    action = vtii.get_action_from_frames_and_transcript(state_dict["frames"], transcript)
-    logger.info(f"action: {action}")
-    resp = requests.post(f"{URL}/api/action", json={"content": action})
-    logger.info(f"HTTP resp: {resp}")
+
+    # action = vtii.get_action_from_frames_and_transcript(state_dict["frames"], transcript)
+    # logger.info(f"action: {action}")
+    # resp = requests.post(f"{URL}/api/action", json={"content": action})
+    # logger.info(f"HTTP resp: {resp}")
+
+    t3 = Thread(target=f3, args=(state_dict,))
+    t4 = Thread(target=f4, args=(state_dict,transcript,))
+
+    # break point
+    threads = [t3, t4]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
 
 if __name__ == "__main__":
+    # asyncio.run(voice_agent_main())
+
     main()
