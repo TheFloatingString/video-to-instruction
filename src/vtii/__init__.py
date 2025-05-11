@@ -20,7 +20,7 @@ OPENAI_API_KEY = os.getenv("X_OPENAI_API_KEY")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 VERBOSE = False
 
-DOWNSIZE_FRAMES = False
+DOWNSIZE_FRAMES = True
 
 logger = logging.getLogger("vtii")
 logger.setLevel(logging.INFO)
@@ -152,7 +152,7 @@ def get_summary_from_windows(video_filepath: str) -> str:
 
 
 def downsize_frame(frame):
-    return cv2.resize(frame, (224, 224))
+    return cv2.resize(frame, (320,240))
 
 
 def thread_get_summary_from_sliding_window_frame(
@@ -229,6 +229,53 @@ def get_summary_from_sliding_window_frame(list_of_frames: list) -> str:
     return resp.output[-1].content[0].text
 
 
+def get_action_from_frames_and_transcript(list_of_frames, transcript) -> str:
+    frames = []
+
+    for i in range(len(list_of_frames)):
+        if i % 15 == 0:
+            frames.append(list_of_frames[i])
+
+    if DOWNSIZE_FRAMES:
+        frames = [downsize_frame(frame) for frame in frames]
+
+    with open(PYYAML_FILEPATH, "r") as fp:
+        data_config = yaml.safe_load(fp)
+
+    actions_list = list(data_config["v1"]["actions"])
+    
+    # logger.info(f"actions_list: {str(actions_list)}")
+    logger.info(len(frames))
+
+    resp = client.responses.create(
+        model="o4-mini",
+        input=[
+            {
+                "role": "user",
+                "content": f"""Given the following video frames, and knowing that the speech to text transcript is "{transcript}",
+what action should the robot arm choose out of the following: 
+
+1. pick up the Coca-Cola can
+2. pick up the Red Bull can
+3. pick up the Tony can
+
+The action should be chosen based on clear intent in the speech transcript, or if the user's hand is clearly pointing at an object. Return null if this does not apply.
+
+Return only the action name, and nothing else.
+""",
+            },
+            {
+                "role": "user",
+                "content": populate_image_content(frames),
+            },
+        ],
+    )
+
+    logger.info(resp.output[-1].content[0].text)
+    return resp.output[-1].content[0].text
+
+
+
 def get_description_from_window(video_frames: list) -> str:
     pass
 
@@ -298,8 +345,8 @@ def point_and_identify(video_filepath: str = None, user_frames=None) -> str:
                 else:
                     frames.append(frame)
 
-    for i in tqdm.trange(len(frames)):
-        cv2.imwrite(f"tmp-{i}.png", frames[i])
+    # for i in tqdm.trange(len(frames)):
+    #     cv2.imwrite(f"tmp-{i}.png", frames[i])
 
     logger.info(len(frames))
     resp = client.responses.create(

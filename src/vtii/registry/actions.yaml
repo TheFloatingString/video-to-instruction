@@ -12,4 +12,6 @@ v1:
         - target
     place_upright:
       parameters:
-        -target
+        - target
+
+

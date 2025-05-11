@@ -23,7 +23,7 @@ load_dotenv()
 
 URL = os.getenv("SERVER_URI", "https://desktop-dtohfqr.taile61ba3.ts.net")
 
-SINGLE_TASK = True
+SINGLE_TASK = False
 INTERVAL_SECONDS = 10
 
 state_dict = {"f1_count": 0, "f2_count": 0, "f3_count": 0, "f4_count": 0}
