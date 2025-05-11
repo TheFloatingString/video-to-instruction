@@ -35,17 +35,17 @@ logger = logging.getLogger("Main")
 logger.setLevel(logging.INFO)
 logger.info("Logging setup complete!")
 
-api_executor = ThreadPoolExecutor(max_workers=5)  # Limit concurrent API calls
+api_executor = ThreadPoolExecutor(max_workers=10)  # Limit concurrent API calls
 results_queue = queue.Queue()
 
 
-def submit_api_call(frames):
+def submit_api_call(frames, idx):
     """Submit API call asynchronously"""
 
     def worker():
         try:
             result: str = point_and_identify(user_frames=frames)
-            payload = {"content": result}
+            payload = {"content": result, "idx": idx}
             r = requests.post(f"{URL}/api/point", json=payload)
             results_queue.put(("success", result))
         except Exception as e:
@@ -86,12 +86,12 @@ def f2(main_frames, interval_seconds, state_dict):
 
             subframes = main_frames.copy()
             main_frames.clear()
-            state_dict["f2_count"] += 1
-
             if subframes:
                 logger.info(f"Submitting {len(subframes)} frames for processing")
-                submit_api_call(subframes)
+                submit_api_call(subframes, state_dict["f2_count"])
                 last_processed_time = current_time
+
+            state_dict["f2_count"] += 1
 
         time.sleep(0.1)  # TODO: delete?
 
@@ -136,13 +136,18 @@ def f4(state_dict):
     while True:
         if state_dict["f4_count"] < state_dict["f3_count"]:
             transcription = get_text_from_speech()
-            logger.error(f">>>>>>>>{transcription}")
+            logger.info(f">>>>>>>>{transcription}")
             # audio_file = open("tmp.wav", "rb")
             # transcription = client.audio.transcriptions.create(
             #     model="whisper-1", file=audio_file
             # )
             # logger.info(f"audio transcription: {transcription}")
             logger.info(f">>>>> f4_count: {str(state_dict)}")
+
+            requests.post(
+                os.getenv("SERVER_URI") + "/api/tts",
+                json={"content": transcription, "idx": state_dict["f4_count"]},
+            )
 
             state_dict["f4_count"] += 1
 

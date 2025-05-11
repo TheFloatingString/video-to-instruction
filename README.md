@@ -22,10 +22,11 @@ List of video modes:
 - `video_to_instructions`: feeds an entire video to OpenAI
 - `sliding_window`: sliding window approach
 
-## For development 
+## For development
 
 ```bash
 set X_OPENAI_API_KEY="<API KEY>"
+set SERVER_URI="<URI>"
 pip install uv
 uv sync
 uv run main.py <filepath to video> <video_mode>
