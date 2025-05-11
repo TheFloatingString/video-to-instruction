@@ -14,11 +14,12 @@ from openai_api import audio_to_text  # Import the audio transcription function
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,
     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Set to INFO for more verbose output
 
 # Configuration
 VIDEO_FPS = int(os.getenv("VIDEO_FPS", "30"))  # Frames per second
@@ -71,7 +72,7 @@ def video_capture_thread():
     # Attempt to set FPS, though it might not be respected by all cameras/drivers
     cap.set(cv2.CAP_PROP_FPS, VIDEO_FPS)
     actual_fps = cap.get(cv2.CAP_PROP_FPS)
-    logger.info(f"Requested FPS: {VIDEO_FPS}, Actual FPS from camera: {actual_fps if actual_fps > 0 else 'N/A'}")
+    logger.debug(f"Requested FPS: {VIDEO_FPS}, Actual FPS from camera: {actual_fps if actual_fps > 0 else 'N/A'}")
 
     frame_time_interval = 1.0 / VIDEO_FPS if VIDEO_FPS > 0 else 0.04  # Approx 25 FPS if VIDEO_FPS is 0
 
@@ -117,7 +118,7 @@ def audio_capture_thread():
             audio_buffer.append(indata.copy())  # Add a copy of the audio data chunk
 
     try:
-        logger.info(f"Attempting to open audio input stream with SR={AUDIO_SAMPLE_RATE}, Channels=1, Blocksize={AUDIO_FRAMES_PER_CHUNK}")
+        logger.debug(f"Attempting to open audio input stream with SR={AUDIO_SAMPLE_RATE}, Channels=1, Blocksize={AUDIO_FRAMES_PER_CHUNK}")
         # Using InputStream for continuous capture
         with sd.InputStream(
             samplerate=AUDIO_SAMPLE_RATE,
@@ -146,18 +147,18 @@ def process_task_data(task_id, video_frames_snapshot, audio_chunks_snapshot, age
     
     transcribed_text = None
     if audio_chunks_snapshot:
-        logger.info(f"Task {task_id}: Transcribing {len(audio_chunks_snapshot)} audio chunks using OpenAI API.")
+        logger.debug(f"Task {task_id}: Transcribing {len(audio_chunks_snapshot)} audio chunks using OpenAI API.")
         transcribed_text = audio_to_text(audio_chunks_snapshot, AUDIO_SAMPLE_RATE)
         
         if transcribed_text is not None and transcribed_text.strip() != "":
-            logger.info(f"Task {task_id}: Transcription successful. Text: '{transcribed_text[:60]}...'")
+            logger.debug(f"Task {task_id}: Transcription successful. Text: '{transcribed_text[:60]}...'")
             agent_ref.add_task_data(task_id, "transcribed_audio", transcribed_text)
         elif transcribed_text == "":
-            logger.info(f"Task {task_id}: Transcription resulted in empty text (likely silence).")
+            logger.debug(f"Task {task_id}: Transcription resulted in empty text (likely silence).")
         else:  # None was returned, indicating an error during transcription
             logger.error(f"Task {task_id}: Audio transcription failed or returned None.")
     else:
-        logger.info(f"Task {task_id}: No audio chunks to process.")
+        logger.debug(f"Task {task_id}: No audio chunks to process.")
     
     # Synchronize the final print statement for task completion order
     with print_order_condition:
@@ -190,7 +191,7 @@ def task_scheduling_thread(agent_ref):
         if stop_event.is_set():
             break
 
-        logger.info("Scheduler: Time to schedule a new task.")
+        logger.debug("Scheduler: Time to schedule a new task.")
         
         current_video_frames = []
         current_audio_chunks = []
@@ -205,13 +206,13 @@ def task_scheduling_thread(agent_ref):
                 current_audio_chunks = list(audio_buffer)  # Create a copy
 
         if not current_video_frames and not current_audio_chunks:
-            logger.info("Scheduler: Buffers are empty, skipping task creation this cycle.")
+            logger.debug("Scheduler: Buffers are empty, skipping task creation this cycle.")
             continue
 
         task_id = task_id_counter
         task_id_counter += 1
         
-        logger.info(f"Scheduler: Spawning Task {task_id}.")
+        logger.debug(f"Scheduler: Spawning Task {task_id}.")
         # Create a new thread for the task.
         task_thread = threading.Thread(
             target=process_task_data,
@@ -258,8 +259,8 @@ if __name__ == "__main__":
                 video_len = len(video_buffer)
             with audio_lock:
                 audio_len = len(audio_buffer)
-            logger.info(f"Video buffer size: {video_len}/{VIDEO_BUFFER_MAXLEN} frames")
-            logger.info(f"Audio buffer size: {audio_len}/{AUDIO_CHUNKS_PER_BUFFER} chunks")
+            logger.debug(f"Video buffer size: {video_len}/{VIDEO_BUFFER_MAXLEN} frames")
+            logger.debug(f"Audio buffer size: {audio_len}/{AUDIO_CHUNKS_PER_BUFFER} chunks")
             
     except KeyboardInterrupt:
         logger.info("Shutdown signal received. Stopping threads...")

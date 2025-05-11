@@ -40,13 +40,13 @@ def audio_to_text(audio_chunks, sample_rate):
         write_wav(buffer, sample_rate, concatenated_audio)
         buffer.seek(0)
         
-        logger.info("Transcribing audio from in-memory buffer")
+        logger.debug("Transcribing audio from in-memory buffer")
         transcription = client.audio.transcriptions.create(
             model="whisper-1",
             file=("audio.wav", buffer, "audio/wav")  # Tuple format: (filename, file_object, mime_type)
         )
         
-        logger.info(f"Transcription successful: {transcription.text}")
+        logger.debug(f"Transcription successful: {transcription.text}")
         return transcription.text
     except Exception as e:
         logger.error(f"Error during OpenAI audio transcription: {e}", exc_info=True)
@@ -113,13 +113,13 @@ def generate_response(prompt, history=None):
     messages.append({"role": "user", "content": prompt})
 
     try:
-        logger.info(f"Generating response for prompt: \"{prompt}\" with history.")
+        logger.debug(f"Generating response for prompt: \"{prompt}\" with history.")
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # Or your preferred model
+            model="gpt-4.1",  # Or your preferred model
             messages=messages
         )
         response_text = completion.choices[0].message.content
-        logger.info(f"Generated response: \"{response_text}\"")
+        logger.debug(f"Generated response: \"{response_text}\"")
         return response_text
     except Exception as e:
         logger.error(f"Error during OpenAI text generation: {e}", exc_info=True)
