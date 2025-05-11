@@ -52,10 +52,10 @@ def numpy_to_base64(img_array):
     return f"data:image/png;base64,{base64_img}"
 
 
-def get_description_for_frame(frame: np.ndarray, prompt_mode: str) -> str:
+def get_description_for_frame(frame: np.ndarray, prompt_mode: str, model_name:str="gpt-4o-mini") -> str:
     image_data_url = numpy_to_base64(frame)
     resp = client.responses.create(
-        model="gpt-4o-mini",
+        model=model_name,
         input=[
             {
                 "role": "user",
