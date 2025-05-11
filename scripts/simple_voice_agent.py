@@ -65,6 +65,9 @@ class VoiceAssistant:
         self.video_fps = 30  # Default FPS, can be made configurable
         self.video_source = 0  # Default camera index, can be made configurable
         
+        # Microphone blocking flag
+        self.microphone_blocked = False
+        
     def add_to_history(self, role, content, content_type="text", metadata=None):
         """Add a message to conversation history"""
         entry = {
@@ -189,7 +192,7 @@ class VoiceAssistant:
                             "properties": {
                                 "can_type": {
                                     "type": "string",
-                                    "description": "The type of can to pick up (e.g., 'Coke', 'Pepsi', 'Sprite')."
+                                    "description": "The type of can to pick up (e.g., Coke, Le Mate, Redbull)."
                                 }
                             },
                             "required": ["can_type"]
@@ -198,28 +201,34 @@ class VoiceAssistant:
                     {
                         "type": "function",
                         "name": "describe_scene",
-                        "description": "Describe what is currently visible in the camera's field of view.",
+                        "description": (
+                            "Use this function to get concise, targeted information about the current camera view whenever the user refers to objects, gestures, or visual details in the scene. "
+                            "Call this function to answer queries such as: what can type is being pointed at (e.g., Coke, Le Mate, Redbull), how many fingers is the user holding up, or any other specific visual question. "
+                            "Always provide custom instructions to focus the response on only what is being asked, and keep the answer as concise as possible. "
+                            "Do not include extra information beyond what was requested."
+                            "Use this function to get extra information about what can is requested to be picked up."
+                        ),
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "instructions": {
                                     "type": "string",
-                                    "description": "Custom instructions for describing the scene."
+                                    "description": "Custom instructions for describing the scene. Always specify exactly what to look for or answer."
                                 }
                             },
                             "required": []
                         }
                     },
-                    {
-                        "type": "function",
-                        "name": "identify_pointed_object",
-                        "description": "Identify the object that is currently being pointed at in the camera's view.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
-                    }
+                    # {
+                    #     "type": "function",
+                    #     "name": "identify_pointed_object",
+                    #     "description": "Identify the object that is currently being pointed at in the camera's view.",
+                    #     "parameters": {
+                    #         "type": "object",
+                    #         "properties": {},
+                    #         "required": []
+                    #     }
+                    # }
                 ],
                 "tool_choice": "auto"
             }
@@ -232,15 +241,16 @@ class VoiceAssistant:
         print("🎤 Listening... (Press Ctrl+C to stop)")
         self.recording = True
         self.loop = asyncio.get_running_loop()
-        
+        self.microphone_blocked = False  # Add a flag to block mic
+
         def audio_callback(indata, frames, time, status):
             if status:
                 print(status)
-            if self.recording:
+            # Only queue audio if not blocked
+            if self.recording and not self.microphone_blocked:
                 audio_data = indata.copy()
-                # Put audio data in thread-safe queue
                 self.audio_queue.put(audio_data)
-        
+
         try:
             with sd.InputStream(
                 samplerate=SAMPLE_RATE,
@@ -276,7 +286,17 @@ class VoiceAssistant:
                     await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             pass
-    
+
+    def block_microphone(self):
+        """Block the microphone input (do not queue audio)."""
+        self.microphone_blocked = True
+        print("🎤 Microphone blocked (agent is speaking)")
+
+    def unblock_microphone(self):
+        """Unblock the microphone input (allow audio to be queued)."""
+        self.microphone_blocked = False
+        print("🎤 Microphone unblocked (agent is listening)")
+
     def audio_output_worker(self):
         """Worker thread for continuous audio output"""
         with sd.OutputStream(
@@ -286,26 +306,39 @@ class VoiceAssistant:
             blocksize=CHUNK_SIZE
         ) as stream:
             self.audio_output_stream = stream
-            
             audio_buffer = b''
+            speaking = False
             while self.output_running:
                 try:
                     # Get audio data from queue
                     audio_chunk = self.audio_output_queue.get(timeout=0.01)
                     audio_buffer += audio_chunk
-                    
+                    if not speaking:
+                        self.block_microphone()
+                        speaking = True
                     # Write when we have enough data
-                    while len(audio_buffer) >= CHUNK_SIZE * 2:  # 2 bytes per int16 sample
+                    while len(audio_buffer) >= CHUNK_SIZE * 2:
                         chunk_to_write = audio_buffer[:CHUNK_SIZE * 2]
                         audio_buffer = audio_buffer[CHUNK_SIZE * 2:]
-                        
-                        # Convert bytes to numpy array
                         audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
-                        
-                        # Write to the stream
                         stream.write(audio_array)
-                        
                 except queue.Empty:
+                    # Drain any remaining audio in buffer before unblocking mic
+                    while len(audio_buffer) >= CHUNK_SIZE * 2:
+                        chunk_to_write = audio_buffer[:CHUNK_SIZE * 2]
+                        audio_buffer = audio_buffer[CHUNK_SIZE * 2:]
+                        audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
+                        stream.write(audio_array)
+                    if len(audio_buffer) > 0:
+                        # Write any final partial chunk (pad with zeros if needed)
+                        pad_len = CHUNK_SIZE * 2 - len(audio_buffer)
+                        chunk_to_write = audio_buffer + b'\x00' * pad_len
+                        audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
+                        stream.write(audio_array)
+                        audio_buffer = b''
+                    if speaking:
+                        self.unblock_microphone()
+                        speaking = False
                     # Write silence if no data available
                     silence = np.zeros(CHUNK_SIZE, dtype=np.int16)
                     stream.write(silence)
@@ -313,6 +346,9 @@ class VoiceAssistant:
                     if self.output_running:
                         print(f"Audio output error: {e}")
                     break
+            # Ensure mic is unblocked on exit
+            if speaking:
+                self.unblock_microphone()
     
     def start_audio_output(self):
         """Start the audio output thread"""
@@ -367,7 +403,7 @@ class VoiceAssistant:
             elif function_name == "pick_up_can":
                 args = json.loads(arguments)
                 can_type = args.get("can_type", "")
-                output = json.dumps({"status": "success", "can_type": can_type})
+                output = json.dumps({"result": f"The robot arm is picking up a {can_type} can."})
                 
             elif function_name == "describe_scene":
                 # Get the latest frame from the video buffer
