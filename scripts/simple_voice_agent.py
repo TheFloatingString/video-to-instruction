@@ -14,6 +14,7 @@ import cv2
 import threading
 from video_buffer import VideoCaptureBuffer
 from openai_api import image_to_text
+from vtii import get_description_for_frame
 
 # Load environment variables
 load_dotenv()
@@ -395,7 +396,12 @@ class VoiceAssistant:
                 output = json.dumps({"description": description})
                 
             elif function_name == "identify_pointed_object":
-                output = json.dumps({"object": "Pointed object placeholder"})
+                if self.video_buffer:
+                    frames = self.video_buffer.get_frames()
+                    if frames:
+                        frame = frames[-1]
+                        content:str = get_description_for_frame(frame=frame, prompt_mode="single_task", model_name="gpt-4.1")
+                        output = json.dumps({"object": f"{content}"})
                 
             else:
                 output = json.dumps({"error": f"Unknown function: {function_name}"})
