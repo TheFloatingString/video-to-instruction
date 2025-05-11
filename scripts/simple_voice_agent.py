@@ -64,6 +64,9 @@ class VoiceAssistant:
         self.video_fps = 30  # Default FPS, can be made configurable
         self.video_source = 0  # Default camera index, can be made configurable
         
+        # Microphone blocking flag
+        self.microphone_blocked = False
+        
     def add_to_history(self, role, content, content_type="text", metadata=None):
         """Add a message to conversation history"""
         entry = {
@@ -231,15 +234,16 @@ class VoiceAssistant:
         print("🎤 Listening... (Press Ctrl+C to stop)")
         self.recording = True
         self.loop = asyncio.get_running_loop()
-        
+        self.microphone_blocked = False  # Add a flag to block mic
+
         def audio_callback(indata, frames, time, status):
             if status:
                 print(status)
-            if self.recording:
+            # Only queue audio if not blocked
+            if self.recording and not self.microphone_blocked:
                 audio_data = indata.copy()
-                # Put audio data in thread-safe queue
                 self.audio_queue.put(audio_data)
-        
+
         try:
             with sd.InputStream(
                 samplerate=SAMPLE_RATE,
@@ -275,7 +279,17 @@ class VoiceAssistant:
                     await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             pass
-    
+
+    def block_microphone(self):
+        """Block the microphone input (do not queue audio)."""
+        self.microphone_blocked = True
+        print("🎤 Microphone blocked (agent is speaking)")
+
+    def unblock_microphone(self):
+        """Unblock the microphone input (allow audio to be queued)."""
+        self.microphone_blocked = False
+        print("🎤 Microphone unblocked (agent is listening)")
+
     def audio_output_worker(self):
         """Worker thread for continuous audio output"""
         with sd.OutputStream(
@@ -285,26 +299,26 @@ class VoiceAssistant:
             blocksize=CHUNK_SIZE
         ) as stream:
             self.audio_output_stream = stream
-            
             audio_buffer = b''
+            speaking = False
             while self.output_running:
                 try:
                     # Get audio data from queue
                     audio_chunk = self.audio_output_queue.get(timeout=0.01)
                     audio_buffer += audio_chunk
-                    
+                    if not speaking:
+                        self.block_microphone()
+                        speaking = True
                     # Write when we have enough data
-                    while len(audio_buffer) >= CHUNK_SIZE * 2:  # 2 bytes per int16 sample
+                    while len(audio_buffer) >= CHUNK_SIZE * 2:
                         chunk_to_write = audio_buffer[:CHUNK_SIZE * 2]
                         audio_buffer = audio_buffer[CHUNK_SIZE * 2:]
-                        
-                        # Convert bytes to numpy array
                         audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
-                        
-                        # Write to the stream
                         stream.write(audio_array)
-                        
                 except queue.Empty:
+                    if speaking:
+                        self.unblock_microphone()
+                        speaking = False
                     # Write silence if no data available
                     silence = np.zeros(CHUNK_SIZE, dtype=np.int16)
                     stream.write(silence)
@@ -312,6 +326,9 @@ class VoiceAssistant:
                     if self.output_running:
                         print(f"Audio output error: {e}")
                     break
+            # Ensure mic is unblocked on exit
+            if speaking:
+                self.unblock_microphone()
     
     def start_audio_output(self):
         """Start the audio output thread"""
