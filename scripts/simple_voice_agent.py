@@ -49,6 +49,10 @@ class VoiceAssistant:
         # Task management
         self.tasks = []
         
+        # WebSocket server for web clients
+        self.web_clients = set()
+        self.web_server = None
+        
     def add_to_history(self, role, content, content_type="text", metadata=None):
         """Add a message to conversation history"""
         entry = {
@@ -75,6 +79,57 @@ class VoiceAssistant:
             content = entry["content"]
             print(f"[{timestamp}] {role}: {content}")
         print("===========================\n")
+    
+    async def handle_web_client(self, websocket):
+        """Handle incoming web client connections"""
+        # Add client to our set
+        self.web_clients.add(websocket)
+        print(f"Web client connected. Total clients: {len(self.web_clients)}")
+        
+        # Send current conversation history to the new client
+        await websocket.send(json.dumps({
+            "type": "conversation_history",
+            "history": self.conversation_history
+        }))
+        
+        try:
+            # Wait for client to disconnect
+            await websocket.wait_closed()
+        finally:
+            # Remove client when disconnected
+            self.web_clients.remove(websocket)
+            print(f"Web client disconnected. Total clients: {len(self.web_clients)}")
+    
+    async def broadcast_to_web_clients(self, event):
+        """Send event to all connected web clients"""
+        if self.web_clients:
+            # Create a copy of the set to avoid modification during iteration
+            disconnected_clients = set()
+            
+            for client in self.web_clients.copy():
+                try:
+                    await client.send(json.dumps(event))
+                except websockets.exceptions.ConnectionClosed:
+                    disconnected_clients.add(client)
+                except Exception as e:
+                    print(f"Error sending to web client: {e}")
+                    disconnected_clients.add(client)
+            
+            # Remove disconnected clients
+            for client in disconnected_clients:
+                self.web_clients.discard(client)
+    
+    async def start_web_server(self, port=8765):
+        """Start the WebSocket server for web clients"""
+        # Create a wrapper function that properly handles the method call
+        
+        self.web_server = await websockets.serve(
+            self.handle_web_client, 
+            "localhost", 
+            port
+        )
+        print(f"🌐 WebSocket server started on ws://localhost:{port}")
+        print("Web clients can connect and receive conversation updates")
         
     async def connect(self):
         """Connect to OpenAI Realtime API"""
@@ -328,9 +383,17 @@ class VoiceAssistant:
                 elif event["type"] == "response.audio_transcript.done":
                     # Display the complete transcript and save to history
                     if self.transcript_buffer:
-                        buffer = self.transcript_buffer
-                        print(f"🤖: {buffer}")
-                        self.add_to_history("assistant", buffer)
+                        print(f"\n🤖: {self.transcript_buffer}")
+                        self.add_to_history("assistant", self.transcript_buffer)
+                        
+                        # Send message to web clients
+                        await self.broadcast_to_web_clients({
+                            "type": "new_message",
+                            "role": "assistant",
+                            "content": self.transcript_buffer,
+                            "timestamp": datetime.datetime.now().isoformat()
+                        })
+                        
                         self.transcript_buffer = ""  # Reset buffer
                 
                 elif event["type"] == "input_audio_buffer.speech_started":
@@ -348,10 +411,18 @@ class VoiceAssistant:
                 # THIS IS THE KEY EVENT FOR USER TRANSCRIPTION
                 elif event["type"] == "conversation.item.input_audio_transcription.completed":
                     # User speech transcription is complete
-                    transcript = event.get("transcript", "")[:-1]
+                    transcript = event.get("transcript", "")
                     if transcript:
                         print(f"\n👤: {transcript}")
                         self.add_to_history("user", transcript)
+                        
+                        # Send message to web clients
+                        await self.broadcast_to_web_clients({
+                            "type": "new_message",
+                            "role": "user",
+                            "content": transcript,
+                            "timestamp": datetime.datetime.now().isoformat()
+                        })
                 
                 elif event["type"] == "response.done":
                     # Check for function calls in the response
@@ -386,6 +457,11 @@ class VoiceAssistant:
         # Cancel all tasks
         self.recording = False
         
+        # Close web server
+        if self.web_server:
+            self.web_server.close()
+            await self.web_server.wait_closed()
+            
         # Close websocket
         if self.websocket:
             await self.websocket.close()
@@ -400,6 +476,9 @@ class VoiceAssistant:
             
             # Start the audio output thread
             self.start_audio_output()
+            
+            # Start the web server
+            await self.start_web_server()
             
             # Create tasks
             self.tasks = [
@@ -446,9 +525,11 @@ if __name__ == "__main__":
     print("  • Conversation history tracking")
     print("  • Custom system prompts")
     print("  • Function calling (time, calculator, notes)")
-    print("-------------------------------- --------")
+    print("  • WebSocket server for web clients")
+    print("----------------------------------------")
     print("Make sure you have your OPENAI_API_KEY in a .env file")
     print("Press Ctrl+C to exit and see conversation history")
+    print("Web clients can connect to ws://localhost:8765")
     print()
     
     try:
