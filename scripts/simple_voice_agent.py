@@ -316,6 +316,19 @@ class VoiceAssistant:
                         audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
                         stream.write(audio_array)
                 except queue.Empty:
+                    # Drain any remaining audio in buffer before unblocking mic
+                    while len(audio_buffer) >= CHUNK_SIZE * 2:
+                        chunk_to_write = audio_buffer[:CHUNK_SIZE * 2]
+                        audio_buffer = audio_buffer[CHUNK_SIZE * 2:]
+                        audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
+                        stream.write(audio_array)
+                    if len(audio_buffer) > 0:
+                        # Write any final partial chunk (pad with zeros if needed)
+                        pad_len = CHUNK_SIZE * 2 - len(audio_buffer)
+                        chunk_to_write = audio_buffer + b'\x00' * pad_len
+                        audio_array = np.frombuffer(chunk_to_write, dtype=np.int16)
+                        stream.write(audio_array)
+                        audio_buffer = b''
                     if speaking:
                         self.unblock_microphone()
                         speaking = False
