@@ -46,6 +46,9 @@ class VoiceAssistant:
         # System prompt
         self.system_prompt = system_prompt or "You are a helpful voice assistant."
         
+        # Task management
+        self.tasks = []
+        
     def add_to_history(self, role, content, content_type="text", metadata=None):
         """Add a message to conversation history"""
         entry = {
@@ -104,6 +107,10 @@ class VoiceAssistant:
                 "voice": "alloy",  # Choose voice: alloy, echo, fable, onyx, nova, shimmer
                 "temperature": 0.7,
                 "instructions": self.system_prompt,  # System prompt
+                # ENABLE USER TRANSCRIPTION
+                "input_audio_transcription": {
+                    "model": "whisper-1"
+                },
                 # Function calling configuration
                 "tools": [
                     {
@@ -171,35 +178,41 @@ class VoiceAssistant:
                 # Put audio data in thread-safe queue
                 self.audio_queue.put(audio_data)
         
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=np.int16,
-            blocksize=CHUNK_SIZE,
-            callback=audio_callback
-        ):
-            await asyncio.Future()  # Run forever
+        try:
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=np.int16,
+                blocksize=CHUNK_SIZE,
+                callback=audio_callback
+            ):
+                await asyncio.Future()  # Run forever
+        except asyncio.CancelledError:
+            pass
     
     async def send_audio(self):
         """Send recorded audio to OpenAI"""
-        while True:
-            if self.recording:
-                try:
-                    # Get audio from thread-safe queue
-                    audio_chunk = self.audio_queue.get_nowait()
-                    audio_bytes = audio_chunk.tobytes()
-                    audio_base64 = base64.b64encode(audio_bytes).decode()
-                    
-                    audio_message = {
-                        "type": "input_audio_buffer.append",
-                        "audio": audio_base64
-                    }
-                    
-                    await self.websocket.send(json.dumps(audio_message))
-                except queue.Empty:
-                    await asyncio.sleep(0.01)
-            else:
-                await asyncio.sleep(0.1)
+        try:
+            while True:
+                if self.recording:
+                    try:
+                        # Get audio from thread-safe queue
+                        audio_chunk = self.audio_queue.get_nowait()
+                        audio_bytes = audio_chunk.tobytes()
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        
+                        audio_message = {
+                            "type": "input_audio_buffer.append",
+                            "audio": audio_base64
+                        }
+                        
+                        await self.websocket.send(json.dumps(audio_message))
+                    except queue.Empty:
+                        await asyncio.sleep(0.01)
+                else:
+                    await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
     
     def audio_output_worker(self):
         """Worker thread for continuous audio output"""
@@ -234,7 +247,8 @@ class VoiceAssistant:
                     silence = np.zeros(CHUNK_SIZE, dtype=np.int16)
                     stream.write(silence)
                 except Exception as e:
-                    print(f"Audio output error: {e}")
+                    if self.output_running:
+                        print(f"Audio output error: {e}")
                     break
     
     def start_audio_output(self):
@@ -296,8 +310,8 @@ class VoiceAssistant:
     
     async def receive_and_handle_events(self):
         """Receive and handle all server events"""
-        while True:
-            try:
+        try:
+            while True:
                 response = await self.websocket.recv()
                 event = json.loads(response)
                 
@@ -314,8 +328,9 @@ class VoiceAssistant:
                 elif event["type"] == "response.audio_transcript.done":
                     # Display the complete transcript and save to history
                     if self.transcript_buffer:
-                        print(f"\n🤖: {self.transcript_buffer}")
-                        self.add_to_history("assistant", self.transcript_buffer)
+                        buffer = self.transcript_buffer
+                        print(f"🤖: {buffer}")
+                        self.add_to_history("assistant", buffer)
                         self.transcript_buffer = ""  # Reset buffer
                 
                 elif event["type"] == "input_audio_buffer.speech_started":
@@ -326,6 +341,18 @@ class VoiceAssistant:
                     # User stopped speaking
                     print("🔴 User stopped speaking")
                     
+                elif event["type"] == "input_audio_buffer.committed":
+                    # Audio has been processed and committed
+                    print("✅ Audio processed, waiting for transcription...")
+                
+                # THIS IS THE KEY EVENT FOR USER TRANSCRIPTION
+                elif event["type"] == "conversation.item.input_audio_transcription.completed":
+                    # User speech transcription is complete
+                    transcript = event.get("transcript", "")[:-1]
+                    if transcript:
+                        print(f"\n👤: {transcript}")
+                        self.add_to_history("user", transcript)
+                
                 elif event["type"] == "response.done":
                     # Check for function calls in the response
                     output = event.get("response", {}).get("output", [])
@@ -337,26 +364,32 @@ class VoiceAssistant:
                                 item.get("arguments")
                             )
                     
-                elif event["type"] == "conversation.item.created":
-                    # User message received (transcribed)
-                    item = event.get("item", {})
-                    if item.get("role") == "user" and item.get("content"):
-                        for content_part in item.get("content", []):
-                            if content_part.get("type") == "input_audio" and "transcript" in content_part:
-                                user_transcript = content_part.get("transcript", "")
-                                if user_transcript:
-                                    print(f"\n👤: {user_transcript}")
-                                    self.add_to_history("user", user_transcript)
-                    
                 elif event["type"] == "error":
                     print(f"❌ Error: {event.get('error', {}).get('message', 'Unknown error')}")
                     
-            except websockets.exceptions.ConnectionClosed:
-                print("Connection closed")
-                break
-            except Exception as e:
-                print(f"Error receiving event: {e}")
+        except asyncio.CancelledError:
+            pass
+        except websockets.exceptions.ConnectionClosed:
+            print("Connection closed")
+        except Exception as e:
+            print(f"Error receiving event: {e}")
     
+    async def cleanup(self):
+        """Clean up resources"""
+        print("\nCleaning up...")
+        
+        # Stop audio output
+        self.output_running = False
+        if self.output_thread:
+            self.output_thread.join(timeout=1)
+            
+        # Cancel all tasks
+        self.recording = False
+        
+        # Close websocket
+        if self.websocket:
+            await self.websocket.close()
+            
     async def run(self):
         """Main run loop"""
         try:
@@ -368,28 +401,22 @@ class VoiceAssistant:
             # Start the audio output thread
             self.start_audio_output()
             
-            # Run tasks concurrently
-            tasks = [
-                self.start_recording(),
-                self.send_audio(),
-                self.receive_and_handle_events()
+            # Create tasks
+            self.tasks = [
+                asyncio.create_task(self.start_recording()),
+                asyncio.create_task(self.send_audio()),
+                asyncio.create_task(self.receive_and_handle_events())
             ]
             
-            await asyncio.gather(*tasks)
+            # Run tasks concurrently
+            await asyncio.gather(*self.tasks)
             
-        except KeyboardInterrupt:
-            print("\n👋 Goodbye!")
-            print("\n=== Final Conversation History ===")
-            self.print_conversation_history()
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             print(f"❌ Error: {e}")
         finally:
-            # Clean up
-            self.output_running = False
-            if self.output_thread:
-                self.output_thread.join(timeout=1)
-            if self.websocket:
-                await self.websocket.close()
+            await self.cleanup()
 
 async def main():
     # You can customize the system prompt here
@@ -402,7 +429,15 @@ async def main():
     Be concise and friendly in your responses."""
     
     assistant = VoiceAssistant(system_prompt=system_prompt)
-    await assistant.run()
+    
+    try:
+        await assistant.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        print("\n👋 Goodbye!")
+        print("\n=== Final Conversation History ===")
+        assistant.print_conversation_history()
 
 if __name__ == "__main__":
     print("🎙️ Enhanced Voice Assistant with OpenAI Realtime API")
@@ -411,9 +446,12 @@ if __name__ == "__main__":
     print("  • Conversation history tracking")
     print("  • Custom system prompts")
     print("  • Function calling (time, calculator, notes)")
-    print("----------------------------------------")
+    print("-------------------------------- --------")
     print("Make sure you have your OPENAI_API_KEY in a .env file")
     print("Press Ctrl+C to exit and see conversation history")
     print()
     
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nExiting...")
