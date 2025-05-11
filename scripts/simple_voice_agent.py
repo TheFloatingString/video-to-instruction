@@ -192,7 +192,7 @@ class VoiceAssistant:
                             "properties": {
                                 "can_type": {
                                     "type": "string",
-                                    "description": "The type of can to pick up (e.g., 'Coke', 'Pepsi', 'Sprite')."
+                                    "description": "The type of can to pick up (e.g., Coke, Le Mate, Redbull)."
                                 }
                             },
                             "required": ["can_type"]
@@ -201,28 +201,34 @@ class VoiceAssistant:
                     {
                         "type": "function",
                         "name": "describe_scene",
-                        "description": "Describe what is currently visible in the camera's field of view.",
+                        "description": (
+                            "Use this function to get concise, targeted information about the current camera view whenever the user refers to objects, gestures, or visual details in the scene. "
+                            "Call this function to answer queries such as: what can type is being pointed at (e.g., Coke, Le Mate, Redbull), how many fingers is the user holding up, or any other specific visual question. "
+                            "Always provide custom instructions to focus the response on only what is being asked, and keep the answer as concise as possible. "
+                            "Do not include extra information beyond what was requested."
+                            "Use this function to get extra information about what can is requested to be picked up."
+                        ),
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "instructions": {
                                     "type": "string",
-                                    "description": "Custom instructions for describing the scene."
+                                    "description": "Custom instructions for describing the scene. Always specify exactly what to look for or answer."
                                 }
                             },
                             "required": []
                         }
                     },
-                    {
-                        "type": "function",
-                        "name": "identify_pointed_object",
-                        "description": "Identify the object that is currently being pointed at in the camera's view.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
-                    }
+                    # {
+                    #     "type": "function",
+                    #     "name": "identify_pointed_object",
+                    #     "description": "Identify the object that is currently being pointed at in the camera's view.",
+                    #     "parameters": {
+                    #         "type": "object",
+                    #         "properties": {},
+                    #         "required": []
+                    #     }
+                    # }
                 ],
                 "tool_choice": "auto"
             }
@@ -397,7 +403,7 @@ class VoiceAssistant:
             elif function_name == "pick_up_can":
                 args = json.loads(arguments)
                 can_type = args.get("can_type", "")
-                output = json.dumps({"status": "success", "can_type": can_type})
+                output = json.dumps({"result": f"The robot arm is picking up a {can_type} can."})
                 
             elif function_name == "describe_scene":
                 # Get the latest frame from the video buffer
