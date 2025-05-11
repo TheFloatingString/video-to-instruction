@@ -9,6 +9,9 @@ import os
 import random  # For random sleep in task
 from scipy.io.wavfile import write as write_wav  # For saving audio
 
+from agent_thread import AgentThread  # Import the new AgentThread
+from openai_api import audio_to_text  # Import the audio transcription function
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +45,7 @@ last_printed_task_id = -1  # Task IDs start from 0
 task_id_counter = 0  # Global counter for task IDs
 
 stop_event = threading.Event()  # Event to signal threads to stop
+agent_instance = None  # Global variable to hold the agent instance
 
 def video_capture_thread():
     """
@@ -131,34 +135,47 @@ def audio_capture_thread():
     finally:
         logger.info("Audio capture thread stopped.")
 
-def process_task_data(task_id, video_frames_snapshot, audio_chunks_snapshot):
+def process_task_data(task_id, video_frames_snapshot, audio_chunks_snapshot, agent_ref):
     """
-    Processes video and audio data. Work is done in parallel.
+    Processes video and audio data. Audio is transcribed and sent to the Agent.
     The final print statement is synchronized to ensure sequential order.
     """
-    global last_printed_task_id  # Allow modification of this global
+    global last_printed_task_id
 
     logger.info(f"Task {task_id}: Starting processing with {len(video_frames_snapshot)} video frames and {len(audio_chunks_snapshot)} audio chunks.")
     
-    # Simulate work with a random delay - this part runs in parallel for different tasks
-    # sleep_duration = random.uniform(4, 10)  # Simulate work for 1-4 seconds
-    sleep_duration = 20 if task_id % 2 == 0 else 2
-    logger.info(f"Task {task_id}: Simulating work for {sleep_duration:.2f} seconds.")
-    time.sleep(sleep_duration)
+    transcribed_text = None
+    if audio_chunks_snapshot:
+        logger.info(f"Task {task_id}: Transcribing {len(audio_chunks_snapshot)} audio chunks using OpenAI API.")
+        transcribed_text = audio_to_text(audio_chunks_snapshot, AUDIO_SAMPLE_RATE)
+        
+        if transcribed_text is not None and transcribed_text.strip() != "":
+            logger.info(f"Task {task_id}: Transcription successful. Text: '{transcribed_text[:60]}...'")
+            agent_ref.add_task_data(task_id, "transcribed_audio", transcribed_text)
+        elif transcribed_text == "":
+            logger.info(f"Task {task_id}: Transcription resulted in empty text (likely silence).")
+        else:  # None was returned, indicating an error during transcription
+            logger.error(f"Task {task_id}: Audio transcription failed or returned None.")
+    else:
+        logger.info(f"Task {task_id}: No audio chunks to process.")
     
-    # Synchronize the final print statement
-    # The 'with' statement on a Condition object acquires its underlying lock
+    # Synchronize the final print statement for task completion order
     with print_order_condition:
         while last_printed_task_id != task_id - 1:
-            print_order_condition.wait()  # Releases lock, waits, reacquires lock
+            print_order_condition.wait(timeout=0.5)  # Wait with a timeout
+            if stop_event.is_set():  # Check if shutdown initiated
+                logger.info(f"Task {task_id}: Stop event detected during print wait, exiting.")
+                return  # Exit if stop event is set
         
-        logger.info(f"Task {task_id}: Processing finished.")
+        status_message = "Data sent to agent" if transcribed_text and transcribed_text.strip() else "No new audio data for agent"
+        logger.info(f"Task {task_id}: Processing finished. Status: {status_message}.")
         last_printed_task_id = task_id
-        print_order_condition.notify_all()  # Notify other waiting tasks (if any)
+        print_order_condition.notify_all()
 
-def task_scheduling_thread():
+def task_scheduling_thread(agent_ref):
     """
     Periodically extracts data from buffers and spawns new task processing threads.
+    Passes a reference to the agent to each task.
     """
     global task_id_counter
     logger.info("Task scheduling thread started.")
@@ -198,7 +215,7 @@ def task_scheduling_thread():
         # Create a new thread for the task.
         task_thread = threading.Thread(
             target=process_task_data,
-            args=(task_id, current_video_frames, current_audio_chunks),
+            args=(task_id, current_video_frames, current_audio_chunks, agent_ref),
             name=f"TaskProcessingThread-{task_id}"
         )
         task_thread.daemon = True  # Allow main program to exit even if tasks are queued
@@ -207,14 +224,22 @@ def task_scheduling_thread():
     logger.info("Task scheduling thread stopped.")
 
 if __name__ == "__main__":
-    logger.info("Starting data collection threads...")
+    logger.info("Starting application...")
+    # Ensure OPENAI_API_KEY is set for the application to function fully
+    if not os.getenv("X_OPENAI_API_KEY"):
+        logger.warning("X_OPENAI_API_KEY environment variable is not set. OpenAI API calls will fail.")
+
     logger.info(f"Video Buffer Max Length: {VIDEO_BUFFER_MAXLEN} frames ({BUFFER_DURATION_SECONDS}s @ {VIDEO_FPS} FPS)")
     logger.info(f"Audio Buffer Max Length: {AUDIO_CHUNKS_PER_BUFFER} chunks ({BUFFER_DURATION_SECONDS}s, each chunk {AUDIO_CHUNK_DURATION_SECONDS}s)")
 
-    # Create and start threads
+    # Create and start the Agent Thread
+    agent_instance = AgentThread()
+    agent_instance.start()
+
+    # Create and start other threads
     video_thread = threading.Thread(target=video_capture_thread, name="VideoCaptureThread")
     audio_thread = threading.Thread(target=audio_capture_thread, name="AudioCaptureThread")
-    scheduler_thread = threading.Thread(target=task_scheduling_thread, name="TaskSchedulingThread")
+    scheduler_thread = threading.Thread(target=task_scheduling_thread, args=(agent_instance,), name="TaskSchedulingThread")
 
     video_thread.daemon = True  # Allow main program to exit even if threads are running
     audio_thread.daemon = True
@@ -238,7 +263,22 @@ if __name__ == "__main__":
             
     except KeyboardInterrupt:
         logger.info("Shutdown signal received. Stopping threads...")
-        stop_event.set()
+        stop_event.set()  # Signal all threads to stop their loops
+
+        logger.info("Stopping agent thread...")
+        if agent_instance:
+            agent_instance.stop()
+            # Wait for agent thread to finish its current work and exit run loop
+            if agent_instance.is_alive():
+                agent_instance.join(timeout=5) 
+            if agent_instance.is_alive():
+                logger.warning("Agent thread did not stop in time.")
+            else:
+                logger.info("Agent thread stopped successfully.")
+
+        # Other threads (video, audio, scheduler) will see stop_event and exit their loops.
+        # Give them a moment before trying to join.
+        # The task processing threads are daemon and will be handled by print_order_condition timeout or stop_event check.
 
         # Save buffers before exiting
         logger.info("Saving video and audio buffers...")
@@ -282,7 +322,6 @@ if __name__ == "__main__":
             else:
                 logger.info("Audio buffer is empty. Nothing to save.")
 
-    finally:
         # Wait for threads to finish
         if video_thread.is_alive():
             logger.info("Waiting for video thread to stop...")
@@ -292,7 +331,10 @@ if __name__ == "__main__":
             audio_thread.join(timeout=5)  # Wait up to 5 seconds
         if scheduler_thread.is_alive():
             logger.info("Waiting for scheduler thread to stop...")
-            scheduler_thread.join(timeout=TASK_INTERVAL_SECONDS + 1)  # Wait for it to finish its cycle
+            scheduler_thread.join(timeout=TASK_INTERVAL_SECONDS + 2)
+
+        logger.info("Allowing a moment for active data capture and task threads to complete...")
+        time.sleep(1)  # Brief pause for threads to react to stop_event
 
         if video_thread.is_alive():
             logger.warning("Video thread did not stop in time.")
@@ -301,5 +343,5 @@ if __name__ == "__main__":
         if scheduler_thread.is_alive():
             logger.warning("Scheduler thread did not stop in time.")
             
-        logger.info("All threads processed for shutdown. Exiting.")
+        logger.info("All threads processed for shutdown. Exiting application.")
 
