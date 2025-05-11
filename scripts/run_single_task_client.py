@@ -23,9 +23,6 @@ load_dotenv()
 
 URL = os.getenv("SERVER_URI", "https://desktop-dtohfqr.taile61ba3.ts.net")
 
-SINGLE_TASK = True
-INTERVAL_SECONDS = 10
-
 state_dict = {"f1_count": 0, "f2_count": 0, "f3_count": 0, "f4_count": 0}
 
 logging.basicConfig(
@@ -65,14 +62,6 @@ def f1(main_frames, state_dict):
         ret, frame = cap.read()
         main_frames.append(frame)
 
-        if SINGLE_TASK:
-            if (
-                state_dict["f2_count"] > 0
-                and state_dict["f3_count"] > 0
-                and state_dict["f4_count"] > 0
-            ):
-                break
-
 
 def f2(main_frames, interval_seconds, state_dict):
     last_processed_time = time.time()
@@ -97,23 +86,13 @@ def f2(main_frames, interval_seconds, state_dict):
 
             subframes = main_frames.copy()
             main_frames.clear()
-            if SINGLE_TASK:
-                state_dict["f2_count"] += 1
-
-                logger.info(f"f2: about to point and detect")
-                description = point_and_identify(user_frames=subframes)
-                logger.info(f"f2: detected a {description}")
-                payload = {"content": description, "idx": state_dict["f2_count"] - 1}
-                r = requests.post(f"{URL}/api/point", json=payload)
-                break
-
             if subframes:
                 logger.info(f"Submitting {len(subframes)} frames for processing")
                 submit_api_call(subframes, state_dict["f2_count"])
-                logger.info("completed function call for point and detect")
                 last_processed_time = current_time
 
             state_dict["f2_count"] += 1
+            break
 
         time.sleep(0.1)  # TODO: delete?
 
@@ -148,8 +127,7 @@ def f3(state_dict):
         logger.info(f">>>>> f3_count: {str(state_dict)}")
 
         state_dict["f3_count"] += 1
-        if SINGLE_TASK:
-            break
+        break
 
 
 def f4(state_dict):
@@ -174,12 +152,10 @@ def f4(state_dict):
             )
 
             state_dict["f4_count"] += 1
-            if SINGLE_TASK:
-                break
+            break
 
 
 if __name__ == "__main__":
-    logging.warning(f"SINGLE_TASK={SINGLE_TASK}")
     main_frames = []
     t_run_webcam = Thread(
         target=f1,
@@ -192,7 +168,7 @@ if __name__ == "__main__":
         target=f2,
         args=(
             main_frames,
-            INTERVAL_SECONDS,
+            5,
             state_dict,
         ),
     )

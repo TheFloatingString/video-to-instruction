@@ -33,7 +33,7 @@ def get_text_from_speech(duration: int = 5):
     audio_file = open("tmp.wav", "rb")
 
     transcription = client.audio.transcriptions.create(
-        model="whisper-1", file=audio_file
+        model="gpt-4o-transcribe", file=audio_file
     )
 
     if VERBOSE:
